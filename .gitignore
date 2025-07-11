@@ -205,3 +205,6 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Fichiers 
+frames_log_08.04.2025-09.12.19.db
