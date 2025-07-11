@@ -3,12 +3,14 @@ import json
 import os
 from datetime import datetime, timezone, timedelta
 
+
 def gnss_to_tai_timestamp(wn, tow_ps, leap_sec):
     gps_epoch = datetime(1980, 1, 6, tzinfo=timezone.utc)
     tow_seconds = tow_ps / 1e12
     gps_time = gps_epoch + timedelta(weeks=wn, seconds=tow_seconds)
     tai_time = gps_time + timedelta(seconds=19 + leap_sec)
     return tai_time.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+
 
 def generate_stec_json(db_path, output_path):
     if not os.path.isfile(db_path):
@@ -30,52 +32,52 @@ def generate_stec_json(db_path, output_path):
         for r_ns, sat, cid, corr, mod in cursor.fetchall()
     }
 
-    # 3) Récupérer toutes les secondes distinctes
+    # 3) Récupérer toutes les secondes distinctes avec tous les signal IDs
     cursor.execute("""
-      SELECT DISTINCT rx_time_nsec
+      SELECT DISTINCT rx_time_nsec, sig_id
       FROM CHANNEL_TRACKING
       WHERE is_used_in_pvt = 1
-      ORDER BY rx_time_nsec
+      ORDER BY rx_time_nsec, sig_id
     """)
-    seconds = [r[0] for r in cursor.fetchall()]
+    time_sig_pairs = [(r[0], r[1]) for r in cursor.fetchall()]
 
     # 4) Initialiser JSON
     json_data = {
-      "mib_ref":      "1.0.0",
-      "payload_name": "/GENERIC/SWING/PAYLOAD/AQUILA",
-      "packet_name":  "TAQUI_TM_211003STEC",
-      "metadata":     {},
-      "parameters": [
-        { "name": "TM_packet_time_TAI",   "pos": 0, "metadata": {} },
-        { "name": "DGENE_AM_SYHDSTECSB0", "pos": 1, "metadata": {} },
-        { "name": "DGENE_AM_SYHDSTECSB1", "pos": 2, "metadata": {} },
-        { "name": "DGENE_AM_SYHDSTECMSI", "pos": 3, "metadata": {} },
-        { "name": "DGENE_AM_SYHDSTECPAS", "pos": 4, "metadata": {} },
-        { "name": "PAQUI_AM_ERXTIMENS",   "pos": 5, "metadata": {} },
-        { "name": "PAQUI_AM_ESIGNALID",   "pos": 6, "metadata": {} },
-        { "name": "PAQUI_AM_ESATID",      "pos": 7, "metadata": {} },
-        { "name": "PAQUI_AM_ESAMPLENB",   "pos": 8, "metadata": {} },
-        {
-          "name":      "PAQUI_CT_ZESAMPLEPKT",
-          "pos":       9,
-          "metadata":  {},
-          "structure": [
-            { "name": "PAQUI_AM_ERXTIMEMS",   "pos": 0, "metadata": {} },
-            { "name": "PAQUI_AM_ETRKSTATUS",  "pos": 1, "metadata": {} },
-            { "name": "PAQUI_AM_ECHNFLAGS",   "pos": 2, "metadata": {} },
-            { "name": "PAQUI_AM_ELOCKTIME",   "pos": 3, "metadata": {} },
-            { "name": "PAQUI_AM_ECARRNOISE",  "pos": 4, "metadata": {} },
-            { "name": "PAQUI_AM_EERRIONO",    "pos": 5, "metadata": {} },
-            { "name": "PAQUI_AM_ERESIDIONO",  "pos": 6, "metadata": {} },
-            { "name": "PAQUI_AM_EIONOCORMDE", "pos": 7, "metadata": {} }
-          ]
-        }
-      ],
-      "data": []
+        "mib_ref":      "1.0.0",
+        "payload_name": "/GENERIC/SWING/PAYLOAD/AQUILA",
+        "packet_name":  "TAQUI_TM_211003STEC",
+        "metadata":     {},
+        "parameters": [
+            {"name": "TM_packet_time_TAI",   "pos": 0, "metadata": {}},
+            {"name": "DGENE_AM_SYHDSTECSB0", "pos": 1, "metadata": {}},
+            {"name": "DGENE_AM_SYHDSTECSB1", "pos": 2, "metadata": {}},
+            {"name": "DGENE_AM_SYHDSTECMSI", "pos": 3, "metadata": {}},
+            {"name": "DGENE_AM_SYHDSTECPAS", "pos": 4, "metadata": {}},
+            {"name": "PAQUI_AM_ERXTIMENS",   "pos": 5, "metadata": {}},
+            {"name": "PAQUI_AM_ESIGNALID",   "pos": 6, "metadata": {}},
+            {"name": "PAQUI_AM_ESATID",      "pos": 7, "metadata": {}},
+            {"name": "PAQUI_AM_ESAMPLENB",   "pos": 8, "metadata": {}},
+            {
+                "name":      "PAQUI_CT_ZESAMPLEPKT",
+                "pos":       9,
+                "metadata":  {},
+                "structure": [
+                    {"name": "PAQUI_AM_ERXTIMEMS",   "pos": 0, "metadata": {}},
+                    {"name": "PAQUI_AM_ETRKSTATUS",  "pos": 1, "metadata": {}},
+                    {"name": "PAQUI_AM_ECHNFLAGS",   "pos": 2, "metadata": {}},
+                    {"name": "PAQUI_AM_ELOCKTIME",   "pos": 3, "metadata": {}},
+                    {"name": "PAQUI_AM_ECARRNOISE",  "pos": 4, "metadata": {}},
+                    {"name": "PAQUI_AM_EERRIONO",    "pos": 5, "metadata": {}},
+                    {"name": "PAQUI_AM_ERESIDIONO",  "pos": 6, "metadata": {}},
+                    {"name": "PAQUI_AM_EIONOCORMDE", "pos": 7, "metadata": {}}
+                ]
+            }
+        ],
+        "data": []
     }
 
-    # 5) Construire data : une entrée par seconde
-    for rx_time_nsec in seconds:
+    # 5) Construire data : une entrée par seconde et signal ID
+    for rx_time_nsec, target_sig_id in time_sig_pairs:
         # a) filtre existence WN + seuil
         if rx_time_nsec not in time_map:
             continue
@@ -83,13 +85,13 @@ def generate_stec_json(db_path, output_path):
         if wn < 2000:
             continue
 
-        # b) récupérer tous les canaux pour cette seconde
+        # b) récupérer tous les canaux pour cette seconde et ce signal ID
         cursor.execute("""
           SELECT sig_id, sat_id, trk_state, flag_val, locktime, cn0, const_id
           FROM CHANNEL_TRACKING
-          WHERE rx_time_nsec = ? AND is_used_in_pvt = 1
+          WHERE rx_time_nsec = ? AND is_used_in_pvt = 1 AND sig_id = ?
           ORDER BY chan_id
-        """, (rx_time_nsec,))
+        """, (rx_time_nsec, target_sig_id))
         rows = cursor.fetchall()
         if not rows:
             continue
@@ -97,8 +99,9 @@ def generate_stec_json(db_path, output_path):
         # c) timestamp TAI
         tm_tai = gnss_to_tai_timestamp(wn, tow_ps, leap_sec)
 
-        # d) premier signal/sat pour positions 6 et 7
-        first_sig, first_sat, *_ = rows[0]
+        # d) utiliser le signal ID cible et le premier satellite
+        first_sig = target_sig_id
+        first_sat = rows[0][1]  # sat_id from first row
 
         # e) construire le tableau imbriqué
         nested = []
@@ -150,17 +153,20 @@ def generate_stec_json(db_path, output_path):
         f.write(',\n  "parameters": [\n')
         for i, p in enumerate(json_data["parameters"]):
             comma = "," if i < len(json_data["parameters"]) - 1 else ""
-            f.write(f'    {{ "name": "{p["name"]}", "pos": {p["pos"]}, "metadata": {{}} }}{comma}\n')
+            f.write(
+                f'    {{ "name": "{p["name"]}", "pos": {p["pos"]}, "metadata": {{}} }}{comma}\n')
         # data ligne par ligne
         f.write('  ],\n  "data": [\n')
         for i, row in enumerate(json_data["data"]):
             comma = "," if i < len(json_data["data"]) - 1 else ""
-            f.write(f'    {json.dumps(row, separators=(",",":"), ensure_ascii=False)}{comma}\n')
+            f.write(
+                f'    {json.dumps(row, separators=(",", ":"), ensure_ascii=False)}{comma}\n')
         f.write('  ]\n}\n')
 
-    print(f"✅ JSON généré : {output_path} ({len(json_data['data'])} paquets)")
+    print(f"JSON généré : {output_path} ({len(json_data['data'])} paquets)")
+
 
 if __name__ == "__main__":
-    db_path     = "frames_log_08.04.2025-09.12.19.db"
+    db_path = "frames_log_08.04.2025-09.12.19.db"
     output_path = "TM_L0_STEC.json"
     generate_stec_json(db_path, output_path)
